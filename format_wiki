@@ -1,0 +1,24 @@
+#!/bin/sh
+
+if [ -d site ]
+then
+	echo "A generated site already exists. Delete the site/ directory to regenerate it."
+	exit 1
+fi
+
+if [ ! -f REQUEST_URI ]
+then
+	echo "You must put your request URI in the REQUEST_URI file. For example :"
+	echo "echo \"USK@STA2Mrf6w~uMRrmxeiAr0qAS4KQqK9DNPcw4nBMzJHE,8BKqfsNWriLyjg76K61muwT6v9XehJ0hD63gJ04UGiQ,AQACAAE/new-wiki/-1/\" > REQUEST_URI"
+	exit 1
+fi
+
+cp -a new-wiki.freenetproject.org site
+
+cd site
+pages=`find . -iname "*.html"`
+
+../prune_xhtml $pages
+../add_to_index `cat ../REQUEST_URI` $pages
+
+cp ../activelink.png .

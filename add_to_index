@@ -1,0 +1,134 @@
+#!/usr/bin/env php
+<?php
+
+$formReplacement = <<<EOT
+<form accept-charset="utf-8" enctype="multipart/form-data" action="/library/" id="searchform" method="post">
+<div>
+<input name="index0" type="hidden" value="%{BASEURI}index.xml"/>
+<input name="extraindexcount" type="hidden" value="1" />
+<input id="searchInput" name="search" type="text" title="Search Freenet Wiki [f]" accesskey="f" value="" />
+<input type="submit" class="searchButton" id="searchGoButton" value="Search (yes, it works!)" title="Search the pages for this text" />
+</div>
+</form>
+EOT;
+
+if($argc <= 2) {
+	echo 'Usage : '.$argv[0]." <basekey> <file> ...\n";
+	die;
+}
+
+$outdir = '.';
+$basekey = $argv[1];
+
+$_SUBINDEXES = array();
+$_FILES = array();
+
+for($i = 2; $i < $argc; ++$i) {
+	$file = $argv[$i];
+	$contents = file_get_contents($file);
+	
+	preg_match('/<title>(.+)<\/title>/sU', $contents, $title);
+	
+	$_FILES[$i]['uri'] = preg_replace('/^\.\//', '', $file);
+	$_FILES[$i]['title'] = $title[1];
+
+	$_I = 0;
+	try {
+		@$root = new SimpleXMLElement($contents);
+		lookWords($i, $root);
+	} catch(Exception $exception) {
+		trigger_error('Could not process '.$file, E_USER_WARNING);
+	}
+	
+	$contents = preg_replace('/<form action="http:\/\/new-wiki\.freenetproject\.org\/index.php" id="searchform">.+<\/form>/sU', str_replace('%{BASEURI}', $basekey, $formReplacement), $contents);
+	$contents = preg_replace('/<li id="pt-login">.+<\/li>/sU', '<li id="pt-login"><a href="/?newbookmark='.$basekey.'&amp;desc=Freenet new-wiki"><img src="activelink.png" alt="" />Add this to your bookmarks</a></li>', $contents);
+	file_put_contents($file, $contents);
+}
+
+function lookWords($fileID, $element) {
+	foreach($element->children() as $child) {
+		lookWords($fileID, $child);
+	}
+	
+	foreach($element->attributes() as $attr => $value) {
+		if(!in_array($attr, array('title', 'alt', ''))) 
+			continue;
+
+		parseWords($fileID, (string)$element[$attr]);
+	}
+
+	$content = trim((string)$element);
+	if($content != '') parseWords($fileID, $content);
+}
+
+function parseWords($fileID, $string) {
+	global $_I, $_SUBINDEXES;
+	$words = preg_split('/\s+/', $string);
+	foreach($words as $word) {
+		$word = strtolower(trim($word, ',.:;()[]"\'@+-/*%~#<>$'));
+		if($word != '') {
+			$_I++;
+			$hash = md5($word);
+			
+			@$_SUBINDEXES[substr($hash, 0, 2)][$word][$fileID][] = $_I;
+		}
+	}
+}
+
+$indexindex = '<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<main_index>
+<prefix value="2"/>
+<header>
+<title>Freenet new-wiki mirror index</title>
+<owner>The guy who inserted the mirror.</owner>
+</header>
+<keywords>
+';
+
+for($i = 0; $i <= 0xFF; ++$i) {
+	$j = str_pad(dechex($i), 2, '0', STR_PAD_LEFT);
+	$indexindex .= '<subIndex key="'.$j.'"/>'."\n";
+}
+
+$indexindex .= '</keywords>
+</main_index>
+';
+
+file_put_contents($outdir.'/index.xml', $indexindex);
+
+for($i = 0; $i <= 0xFF; ++$i) {
+	$j = str_pad(dechex($i), 2, '0', STR_PAD_LEFT);
+	$keywords = '';
+	$files = '';
+	$usedFiles = array();
+	
+	foreach($_SUBINDEXES[$j] as $word => $array) {
+		$keywords .= '<word v="'.$word.'">'."\n";
+	
+		foreach($array as $fileID => $wordPositions) {
+			$usedFiles[$fileID] = true;
+			$keywords .= '<file id="'.$fileID.'">'.implode(',', $wordPositions).'</file>'."\n";
+		}
+		
+		$keywords .= '</word>'."\n";
+	}
+	
+	foreach($usedFiles as $fileID => $true) {
+		$files .= '<file id="'.$fileID.'" key="'.$basekey.$_FILES[$fileID]['uri'].'" title="'.$_FILES[$fileID]['title'].'"/>'."\n";
+	}
+	
+	$subindex = '<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<sub_index>
+<entries value="'.count($_SUBINDEXES[$j]).'"/>
+<header>
+<title>Freenet new-wiki mirror index</title>
+</header>
+<files>
+'.$files.'</files>
+<keywords>
+'.$keywords.'</keywords>
+</sub_index>
+';
+
+	file_put_contents($outdir.'/index_'.$j.'.xml', $subindex);
+}

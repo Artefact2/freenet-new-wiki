@@ -1,0 +1,29 @@
+#!/usr/bin/env php
+<?php
+
+if($argc == 1) {
+	echo 'Usage : '.$argv[0]." <file> ...\n";
+	die;
+}
+
+for($i = 1; $i < $argc; ++$i) {
+	$file = $argv[$i];
+	$contents = file_get_contents($file);
+
+	/* HTTrack has that nasty behavior to add meta tags at the top and bottom
+	 * of each mirrored file for encoding. But fred's xHTML filter does not like
+	 * it at all. */
+	$contents = preg_replace('/<\!-- Added by HTTrack -->.*<\!-- \/Added by HTTrack -->/sU', '', $contents);
+	/* Get rid of any javascript, it wastes space and is going to be filtered
+	 * by the node anyway. */
+	$contents = preg_replace('/<script type= ?"text\/javascript"( src=".+")?>.*<\/script>/sU', '', $contents);
+	/* Also remove IE hacks. */
+	$contents = preg_replace('/<link rel="stylesheet" href="\/skins\/monobook\/IE[0-9]+Fixes.css.*" type="text\/css" media="screen" \/>/sU', '', $contents);
+		
+	$contents = tidy_repair_string($contents, array(
+		'hide-comments' => true, // Extra space-saving
+		'wrap' => 0
+	), 'utf8');
+	
+	file_put_contents($file, $contents);
+}
