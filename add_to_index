@@ -67,6 +67,7 @@ function parseWords($fileID, $string) {
 	$words = preg_split('/\s+/', $string);
 	foreach($words as $word) {
 		$word = strtolower(trim($word, ',.:;()[]"\'@+-/*%~#<>$'));
+		$word = str_replace('"', '', $word);
 		if($word != '') {
 			$_I++;
 			$hash = md5($word);
