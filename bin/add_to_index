@@ -6,19 +6,7 @@
  * To Public License, Version 2, as published by Sam Hocevar. See
  * http://sam.zoy.org/wtfpl/COPYING for more details. */
 
-// This code will replace the traditional search form on every page.
-$formReplacement = <<<EOT
-<form accept-charset="utf-8" enctype="multipart/form-data" action="/library/" id="searchform" method="post">
-<div>
-<input name="index0" type="hidden" value="%{BASEURI}index.xml"/>
-<input name="extraindexcount" type="hidden" value="1" />
-<input id="searchInput" name="search" type="text" title="Search Freenet Wiki [f]" accesskey="f" value="" />
-<input type="submit" class="searchButton" id="searchGoButton" value="Search (yes, it works!)" title="Search the pages for this text" />
-</div>
-</form>
-EOT;
-
-if($argc <= 2) {
+if($argc < 3) {
 	echo 'Usage : '.$argv[0]." <basekey> <file> ...\n";
 	die;
 }
@@ -28,13 +16,85 @@ $basekey = $argv[1];
 
 $_SUBINDEXES = array();
 $_FILES = array();
+$_IGNORE = array(
+        "had",
+        "en",
+        "own",
+        "isn't",
+        "via",
+        "those",
+        "he",
+        "go",
+        "net",
+        "doesn't",
+        "too",
+        "www",
+        "its",
+        "per",
+        "both",
+        "our",
+        "yes",
+        "how",
+        "their",
+        "us",
+        "was",
+        "it's",
+        "out",
+        "very",
+        "could",
+        "than",
+        "don't",
+        "them",
+        "any",
+        "they",
+        "has",
+        "then",
+        "your",
+        "may",
+        "does",
+        "should",
+        "do",
+        "at",
+        "there",
+        "no",
+        "so",
+        "which",
+        "but",
+        "an",
+        "by",
+        "as",
+        "or",
+        "have",
+        "with",
+        "will",
+        "you",
+        "are",
+        "can",
+        "not",
+        "if",
+        "on",
+        "we",
+        "that",
+        "from",
+        "this",
+        "be",
+        "for",
+        "in",
+        "it",
+        "and",
+        "is",
+        "of",
+        "a",
+        "to",
+        "the",
+);
 
 for($i = 2; $i < $argc; ++$i) {
 	$file = $argv[$i];
 	$contents = file_get_contents($file);
-	
+
 	preg_match('/<title>(.+)<\/title>/sU', $contents, $title);
-	
+
 	$_FILES[$i]['uri'] = preg_replace('/^\.\//', '', $file);
 	$_FILES[$i]['title'] = $title[1];
 
@@ -46,19 +106,15 @@ for($i = 2; $i < $argc; ++$i) {
 	} catch(Exception $exception) {
 		trigger_error('Could not process '.$file, E_USER_WARNING);
 	}
-	
-	$contents = preg_replace('/<form action="http:\/\/new-wiki\.freenetproject\.org\/index.php" id="searchform">.+<\/form>/sU', str_replace('%{BASEURI}', $basekey, $formReplacement), $contents);
-	$contents = preg_replace('/<li id="pt-login">.+<\/li>/sU', '<li id="pt-login"><a href="/?newbookmark='.$basekey.'&amp;desc=Freenet new-wiki"><img src="activelink.png" alt="" />Add this to your bookmarks</a></li>', $contents);
-	file_put_contents($file, $contents);
 }
 
 function lookWords($fileID, $element) {
 	foreach($element->children() as $child) {
 		lookWords($fileID, $child);
 	}
-	
+
 	foreach($element->attributes() as $attr => $value) {
-		if(!in_array($attr, array('title', 'alt', ''))) 
+		if(!in_array($attr, array('title', 'alt', '')))
 			continue;
 
 		parseWords($fileID, (string)$element[$attr]);
@@ -69,20 +125,23 @@ function lookWords($fileID, $element) {
 }
 
 function parseWords($fileID, $string) {
-	global $_I, $_SUBINDEXES;
-	$words = preg_split('/\s+/', $string);
+	global $_I, $_SUBINDEXES, $_IGNORE;
+	$words = preg_split('/(\s+|@|\.|,|:|;|_|-|\/)/', $string, null, PREG_SPLIT_NO_EMPTY);
 	foreach($words as $word) {
 		// Remove any character that isn't usually part of a word.
-		$word = strtolower(trim($word, ',.:;()[]"\'@+-/*%~#<>$'));
+		$word = strtolower(trim($word, ',.:;()[]"\'@+-/*%~#<>$?!_'));
 		// Double quotes will break the XML and are not generally part of words.
 		$word = str_replace('"', '', $word);
-		if($word != '') {
+
+		if(!preg_match('/^[a-z]+[0-9a-z]*$/', $word)) continue;
+
+		if(strlen($word) > 1 && !in_array($word, $_IGNORE)) {
 			// We are assuming here that we parse the words in the right order,
 			// this is almost the case and this is the only solution we have
 			// for now.
 			$_I++;
 			$hash = md5($word);
-			
+
 			@$_SUBINDEXES[substr($hash, 0, 2)][$word][$fileID][] = $_I;
 		}
 	}
@@ -114,22 +173,22 @@ for($i = 0; $i <= 0xFF; ++$i) {
 	$keywords = '';
 	$files = '';
 	$usedFiles = array();
-	
+
 	foreach($_SUBINDEXES[$j] as $word => $array) {
 		$keywords .= '<word v="'.$word.'">'."\n";
-	
+
 		foreach($array as $fileID => $wordPositions) {
 			$usedFiles[$fileID] = true;
 			$keywords .= '<file id="'.$fileID.'">'.implode(',', $wordPositions).'</file>'."\n";
 		}
-		
+
 		$keywords .= '</word>'."\n";
 	}
-	
+
 	foreach($usedFiles as $fileID => $true) {
 		$files .= '<file id="'.$fileID.'" key="'.$basekey.$_FILES[$fileID]['uri'].'" title="'.$_FILES[$fileID]['title'].'"/>'."\n";
 	}
-	
+
 	$subindex = '<?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <sub_index>
 <entries value="'.count($_SUBINDEXES[$j]).'"/>

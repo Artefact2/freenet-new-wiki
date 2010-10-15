@@ -1,0 +1,67 @@
+#!/usr/bin/env php
+<?php
+/* This program is free software. It comes without any warranty, to
+ * the extent permitted by applicable law. You can redistribute it
+ * and/or modify it under the terms of the Do What The Fuck You Want
+ * To Public License, Version 2, as published by Sam Hocevar. See
+ * http://sam.zoy.org/wtfpl/COPYING for more details. */
+
+if($argc < 3) {
+	echo 'Usage : '.$argv[0]." <basekey> <file> ...\n";
+	die;
+}
+
+// This code will replace the traditional search form on every page.
+$formReplacement = <<<EOT
+<form accept-charset="utf-8" enctype="multipart/form-data" action="/library/" id="searchform" method="post">
+<div>
+<input name="index0" type="hidden" value="%{BASEURI}index.xml"/>
+<input name="extraindexcount" type="hidden" value="1" />
+<input id="searchInput" name="search" type="text" title="Search Freenet Wiki [f]" accesskey="f" value="" />
+<input type="submit" class="searchButton" id="searchGoButton" value="Search" title="Search the pages for this text" />
+<p><strong>It is slow, but it works. Requires the Library plugin.</strong></p>
+</div>
+</form>
+EOT;
+
+$basekey = $argv[1];
+
+for($i = 2; $i < $argc; ++$i) {
+	$file = $argv[$i];
+	$contents = file_get_contents($file);
+
+	/* HTTrack has that nasty behavior to add meta tags at the top and bottom
+	 * of each mirrored file for encoding. But fred's xHTML filter does not like
+	 * it at all. */
+	$contents = preg_replace('/<\!-- Added by HTTrack -->.*<\!-- \/Added by HTTrack -->/sU', '', $contents);
+	/* Get rid of any javascript, it wastes space and is going to be filtered
+	 * by the node anyway. */
+	$contents = preg_replace('/<script type= ?"text\/javascript"( src=".+")?>.*<\/script>/sU', '', $contents);
+	/* Also remove IE hacks. */
+	$contents = preg_replace('/<link rel="stylesheet" href="\/skins\/monobook\/IE[0-9]+Fixes.css.*" type="text\/css" media="screen" \/>/sU', '', $contents);
+	/* Remove the useless login box. */
+	$contents = preg_replace('/(<li id="pt-login">).+(<\/li>)/sU', '', $contents);
+	/* Remove extraneous stuff in the footer that isn't really necessary. */
+	$contents = preg_replace('/<li id="(copyright|privacy|about|disclaimer)">.*<\/li>/sU', '', $contents);
+	/* Add the new search box that works™. */
+	$contents = preg_replace('/<form action="http:\/\/new-wiki\.freenetproject\.org\/index.php" id="searchform">.+<\/form>/sU',
+		str_replace('%{BASEURI}', $basekey, $formReplacement), $contents);
+	/* Add the activelink and the bookmark link. */
+	$contents = preg_replace('/<li id="viewcount">.+<\/li>/sU',
+		'<li id="viewcount"><a href="/?newbookmark='.$basekey.'&amp;desc=Freenet new-wiki"><img src="activelink.png" alt="" />Add this to your bookmarks</a></li>', $contents);
+	/* Remove useless code. */
+	$contents = preg_replace('/<link rel="(generator|keywords|shortcut icon|search|copyright|alternate)".+\/>/sU', '', $contents);
+	$contents = preg_replace('/<link rel="stylesheet" href="http:.+\/>/sU', '', $contents);
+	$contents = preg_replace('/<div id="f-poweredbyico">.*<\/div>/sU', '', $contents);
+
+	/* Clean (and compress a bit) the source using tidy. */
+	$contents = tidy_repair_string($contents, array(
+		'hide-comments' => true,
+		'wrap' => 0
+	), 'utf8');
+
+	/* The toolbox only links to external stuff, we can safely remove it. */
+	$contents = preg_replace("/<div class=\"portlet\" id=\"p-tb\">.+\n<\/div>\n<\/div>\n/sU", '', $contents);
+
+	file_put_contents($file, $contents);
+}

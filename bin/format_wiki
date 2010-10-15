@@ -17,12 +17,13 @@ then
 	exit 1
 fi
 
-cp -a new-wiki.freenetproject.org site
+cp -a data/new-wiki.freenetproject.org site
 
 cd site
 pages=`find . -iname "*.html"`
+baseuri=`cat ../REQUEST_URI`
 
-../prune_xhtml $pages
-../add_to_index `cat ../REQUEST_URI` $pages
+../bin/prune_xhtml $baseuri $pages
+../bin/add_to_index $baseuri $pages
 
-cp ../activelink.png .
+cp ../art/activelink.png .

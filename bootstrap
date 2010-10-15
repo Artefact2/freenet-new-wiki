@@ -1,3 +1,0 @@
-#!/bin/sh
-
-httrack http://new-wiki.freenetproject.org/ -\*action=\* -\*Special:\* -\*oldid=\* -\*redlink=1\* -\*index.php\*
