@@ -26,6 +26,7 @@ What is currently done :
 	- Search box, to allow embed searching with the Library plugin
 	- Login link, replaced with the activelink.
 3. Generating an index to allow searching.
+4. (Eventually) Inserting it in the Freenet network via FCP.
 
 Usage
 =====
@@ -47,9 +48,16 @@ Inserting the mirror
 Once your mirror is done, you must run `make clean site`. This will
 sanitize all the pages and write the index in the directory `site/`.
 
-All you have to do now is to use your favorite tool to insert the
-`site/` directory. Using an USK is recommended, and set the main page to
-Main_Page.html, NOT index.html !
+The actual inserting is done by `make insert`. That's it.
+
+Doing it all in one command
+---------------------------
+
+If you are a bit familiar with make, you can issue :
+`make update clean insert`
+
+This will update the mirror, generate the new static pages (because
+the insert target depends on the site one) and insert them.
 
 Caveats
 =======

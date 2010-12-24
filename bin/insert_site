@@ -1,0 +1,196 @@
+#!/usr/bin/env php
+<?php
+/* This program is free software. It comes without any warranty, to
+ * the extent permitted by applicable law. You can redistribute it
+ * and/or modify it under the terms of the Do What The Fuck You Want
+ * To Public License, Version 2, as published by Sam Hocevar. See
+ * http://sam.zoy.org/wtfpl/COPYING for more details. */
+
+define('EOL', "\n");
+
+function socket_write_full($socket, $data, $len = false) {
+	if($len === false) $len = strlen($data);
+	$sent = 0;
+	while(($s = socket_write($socket, substr($data, 0, $len - $sent))) !== false && $sent < $len) {
+		$sent += $s;
+	}
+
+	if($sent < $len) {
+	    echo "socket_write() failed : ".socket_strerror(socket_last_error()).EOL;
+		die(1);
+	}
+
+	return $len;
+}
+
+function socket_read_message($socket, $bufferSize = 2048) {
+	$recv = '';
+
+	while($buffer = socket_read($socket, $bufferSize)) {
+		$recv .= $buffer;
+		if(strpos($buffer, 'EndMessage') !== false) break;
+	}
+
+	if($buffer === false) {
+	    echo "socket_read() failed : ".socket_strerror(socket_last_error()).EOL;
+		die(1);
+	}
+
+	return $recv;
+}
+
+class FCPMessage {
+	private $data;
+	private $name;
+
+	public function FCPMessage($name) {
+		$this->name = $name;
+	}
+
+	public function getName() {
+		return $this->name;
+	}
+
+	public function setName($name) {
+		return $this->name = $name;
+	}
+
+	public function getData() {
+		return $this->data;
+	}
+
+	public function setData($data) {
+		return $this->data = $data;
+	}
+
+	public function getKey($k) {
+		return @$this->data[$k];
+	}
+
+	public function putKey($k, $v) {
+		return $this->data[$k] = $v;
+	}
+
+	public static function fromString($string) {
+		$lines = explode(EOL, $string);
+
+		$name = array_shift($lines);
+		$data = array();
+		foreach($lines as $l) {
+			if($l == "EndMessage") break;
+			list($k, $v) = explode('=', $l, 2);
+			$data[$k] = $v;
+		}
+
+		$m = new FCPMessage($name);
+		$m->setData($data);
+		return $m;
+	}
+
+	public function toString() {
+		$out = $this->name.EOL;
+		foreach($this->getData() as $k => $v) {
+			$out .= $k."=".$v.EOL;
+		}
+
+		return $out."EndMessage".EOL;
+	}
+}
+
+if(file_exists('INSERT_URI')) {
+	$insertURI = file_get_contents('INSERT_URI');
+} else {
+	echo "Put your insert URI in a file named INSERT_URI.".EOL;
+	die(1);
+}
+
+if(file_exists('NODE_ADDRESS')) {
+	$addr = file_get_contents('NODE_ADDRESS');
+} else $addr = '127.0.0.1:9481'; // Assume the node runs locally, and
+                                 // uses the default FCP port.
+
+// FIXME: would not work with IPv6 (even ::1). Does the node even
+// support that ?
+list($ip, $port) = explode(':', $addr);
+
+// Connect to the node
+$socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
+if ($socket === false) {
+    echo "socket_create() failed : ".socket_strerror(socket_last_error()).EOL;
+    die(1);
+}
+
+$result = socket_connect($socket, $ip, intval($port));
+
+if ($result === false) {
+    echo "socket_connect() failed : ".socket_strerror(socket_last_error()).EOL;
+    echo "If your node isn't running locally on port 9481, put your custom address\n (ip:port) in a file named NODE_ADDRESS.".EOL;
+    die(1);
+}
+
+$hello = new FCPMessage('ClientHello');
+$hello->putKey('Name', 'freenet-new-wiki');
+$hello->putKey('ExpectedVersion', '2.0');
+
+socket_write_full($socket, $hello->toString());
+$nodeHello = FCPMessage::fromString(socket_read_message($socket));
+
+// Handshake is over, now let's do the real stuff…
+
+$putDir = new FCPMessage('ClientPutDiskDir');
+$putDir->putKey('Identifier', 'freenet-new-wiki_insert');
+$putDir->putKey('MaxRetries', '3'); // That seems to be a good balance.
+$putDir->putKey('DefaultName', 'Main_Page.html');
+$putDir->putKey('Filename', realpath('.').'/site');
+$putDir->putKey('RealTimeFlag', 'false'); // Bulk inserts are GOOD ;)
+$putDir->putKey('URI', $insertURI);
+$putDir->putKey('Verbosity', '1'); // Send SimpleProgress messages
+$putDir->putKey('PriorityClass', '2'); // Semi-interactive priority class
+$putDir->putKey('Global', 'false');
+$putDir->putKey('Persistence', 'connection');
+$putDir->putKey('ExtraInsertsSingleBlock', '3');
+$putDir->putKey('ExtraInsertsSplitfileHeaderBlock', '3');
+
+socket_write_full($socket, $putDir->toString());
+
+$last = 0;
+while(true) {
+	$message = FCPMessage::fromString($reply = socket_read_message($socket));
+	if($message->getName() == "SimpleProgress" && time() - $last > 0) {
+		$success = $message->getKey('Succeeded');
+
+		$total = $message->getKey('Total');
+		if($message->getKey('FinalizedTotal') == 'false') $total .= '??';
+
+		$failed = $message->getKey('Failed');
+
+		echo "[S:$success / T:$total / F:$failed]\n";
+	} else if($message->getName() == "PutSuccessful") {
+		echo "The insert was successful. The new content can be accessed at :".EOL;
+		echo $message->getKey('URI').EOL;
+		socket_close($socket);
+		break;
+	} else if($message->getName() == "PutFailed") {
+		echo "The insert FAILED, and here is why :".EOL;
+		echo $message->getKey('CodeDescription').EOL;
+
+		$errors = array();
+		foreach($message->getData() as $k => $v) {
+			if(strpos($k, "Errors.") === 0) {
+				list(, $number, $item) = explode('.', $k);
+				$errors[$number][$item] = $v;
+			}
+		}
+
+		foreach($errors as $error) {
+			$reason = $error['Description'];
+			$count = $error['Count'];
+			echo "$reason : $count block(s)".EOL;
+		}
+
+		socket_close($socket);
+		die(1);
+	}
+
+	$last = time();
+}
